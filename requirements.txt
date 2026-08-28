@@ -1,7 +1,6 @@
 streamlit
 opencv-python-headless
-paddlepaddle
-paddleocr
+rapidocr-onnxruntime
 pillow
 pandas
 openpyxl
