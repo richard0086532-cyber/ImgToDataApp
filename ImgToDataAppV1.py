@@ -256,6 +256,13 @@
 
 import os
 import sys
+
+# Streamlit Web UI support
+try:
+    import streamlit as st
+    STREAMLIT_AVAILABLE = True
+except ImportError:
+    STREAMLIT_AVAILABLE = False
 import re
 import json
 import math
@@ -279,7 +286,7 @@ from scipy.signal import savgol_filter
 # 必须在 import paddle / paddleocr 之前设置
 # ==============================================================================
 
-# RapidOCR (轻量ONNX，无需paddlepaddle，云端友好)
+# PaddleOCR
 from rapidocr_onnxruntime import RapidOCR
 
 # Matplotlib（可选，用于调试可视化）
@@ -466,35 +473,25 @@ class ChartExtractorAgent:
         self._init_ocr()
 
     def _init_ocr(self):
-        """初始化RapidOCR引擎（轻量ONNX，无需paddlepaddle，自动下载模型约20MB）"""
+        """初始化RapidOCR引擎（轻量ONNX，无需paddlepaddle）"""
         print("[INFO] 正在初始化RapidOCR引擎...")
         self._drop_score = float(self.config["ocr"].get("drop_score", 0.5))
-        try:
-            self.ocr_engine = RapidOCR()
-            print("[INFO] RapidOCR引擎初始化完成（ONNX轻量版）")
-        except Exception as e:
-            print(f"[ERROR] RapidOCR初始化失败: {e}")
-            raise
+        self.ocr_engine = RapidOCR()
+        print("[INFO] RapidOCR引擎初始化完成（ONNX轻量版）")
 
     def _run_ocr(self, img: np.ndarray) -> List:
-        """
-        统一OCR调用入口，RapidOCR轻量ONNX版。
-        始终返回旧版格式: [[bbox, (text, score)], ...]
-        """
+        """统一OCR调用入口，RapidOCR轻量ONNX版"""
         if img is None or img.size == 0:
             return []
         try:
-            result, elapse = self.ocr_engine(img)
+            result, _ = self.ocr_engine(img)
         except Exception as e:
             print(f"[WARN] OCR调用失败: {e}")
             return []
-
         lines = []
         if not result:
             return lines
-
         for item in result:
-            # rapidocr返回: [box, text, score]
             if len(item) < 3:
                 continue
             box, text, score = item
@@ -4753,5 +4750,225 @@ def main():
         agent.process(args.image, args.output)
 
 
+
+# ==============================================================================
+# Streamlit Web UI (Google Minimal Style)
+# ==============================================================================
+
+def _setup_streamlit_page():
+    """Google 极简风格页面配置"""
+    st.set_page_config(
+        page_title="图识 - 图表数据提取",
+        page_icon="📊",
+        layout="centered",
+        initial_sidebar_state="collapsed",
+    )
+    st.markdown("""
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&display=swap');
+        html, body, [class*="css"] { font-family: 'Roboto', 'Microsoft YaHei', sans-serif; }
+        .main { background-color: #ffffff; }
+        .title-text {
+            font-size: 52px; font-weight: 400; color: #202124;
+            text-align: center; margin-top: 50px; margin-bottom: 10px; letter-spacing: -1px;
+        }
+        .subtitle-text {
+            font-size: 16px; color: #5f6368; text-align: center;
+            margin-bottom: 40px; font-weight: 300;
+        }
+        div[data-testid="stFileUploader"] {
+            border: 2px dashed #dadce0; border-radius: 24px;
+            padding: 40px 20px; background-color: #fafafa; transition: all 0.2s;
+        }
+        div[data-testid="stFileUploader"]:hover {
+            border-color: #4285f4; background-color: #f8f9ff;
+        }
+        .stButton>button {
+            background-color: #1a73e8; color: white; border: none;
+            border-radius: 4px; padding: 10px 32px; font-size: 14px; font-weight: 500;
+        }
+        .stButton>button:hover { background-color: #1557b0; }
+        .stDownloadButton>button {
+            background-color: #f8f9fa; color: #3c4043; border: 1px solid #dadce0;
+            border-radius: 4px; font-weight: 500;
+        }
+        .stDownloadButton>button:hover { background-color: #f1f3f4; color: #202124; }
+        .result-card {
+            background-color: #ffffff; border: 1px solid #dadce0;
+            border-radius: 8px; padding: 16px; margin: 8px 0;
+        }
+        .footer { text-align: center; color: #5f6368; font-size: 12px;
+                 margin-top: 60px; padding-bottom: 40px; }
+    </style>
+    """, unsafe_allow_html=True)
+    st.markdown('<div class="title-text">图识</div>', unsafe_allow_html=True)
+    st.markdown('<div class="subtitle-text">上传电力交易中心截图，自动提取曲线数据为 CSV</div>', unsafe_allow_html=True)
+
+
+class StreamlitLogCapture:
+    """捕获 print 日志并显示到 Streamlit"""
+    def __init__(self, placeholder):
+        self.placeholder = placeholder
+        self.lines = []
+        self._buffer = ""
+
+    def write(self, s):
+        self._buffer += s
+        if "\n" in self._buffer:
+            parts = self._buffer.split("\n")
+            for p in parts[:-1]:
+                self.lines.append(p + "\n")
+            self._buffer = parts[-1]
+            display = "".join(self.lines[-40:])
+            self.placeholder.code(display, language="log")
+
+    def flush(self):
+        if self._buffer:
+            self.lines.append(self._buffer)
+            self._buffer = ""
+        display = "".join(self.lines[-40:])
+        self.placeholder.code(display, language="log")
+
+
+def run_streamlit():
+    _setup_streamlit_page()
+
+    uploaded_files = st.file_uploader(
+        "支持 PNG、JPG、JPEG、BMP 格式，可一次上传多张",
+        type=["png", "jpg", "jpeg", "bmp"],
+        accept_multiple_files=True,
+    )
+
+    if not uploaded_files:
+        st.markdown("""
+        <div style="text-align:center; color:#5f6368; margin-top:40px;">
+            <p>📤 拖拽图片到上方，或点击选择文件</p>
+            <p style="font-size:13px; color:#9aa0a6;">自动识别坐标轴、曲线、峰值标注，输出 96 点 CSV</p>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown('<div class="footer">云端离线计算，数据不上传至外部服务器</div>', unsafe_allow_html=True)
+        return
+
+    with st.expander("⚙️ 高级参数"):
+        col1, col2 = st.columns(2)
+        with col1:
+            out_points = st.number_input("输出点数", min_value=24, max_value=288, value=96, step=24)
+        with col2:
+            use_gpu = st.checkbox("OCR 使用 GPU", value=False)
+
+    if st.button("🚀 开始识别", type="primary"):
+        import tempfile
+        import io
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_dir = os.path.join(tmpdir, "input")
+            output_dir = os.path.join(tmpdir, "output")
+            os.makedirs(input_dir, exist_ok=True)
+            os.makedirs(output_dir, exist_ok=True)
+
+            for uf in uploaded_files:
+                with open(os.path.join(input_dir, uf.name), "wb") as f:
+                    f.write(uf.getvalue())
+
+            log_box = st.empty()
+            old_stdout = sys.stdout
+            sys.stdout = StreamlitLogCapture(log_box)
+
+            @st.cache_resource(show_spinner=False)
+            def get_agent(gpu=False, pts=96):
+                cfg = DEFAULT_CONFIG.copy()
+                cfg["chart"]["output_points"] = pts
+                cfg["ocr"]["use_gpu"] = gpu
+                return ChartExtractorAgent(cfg)
+
+            try:
+                agent = get_agent(use_gpu, out_points)
+            except Exception as e:
+                sys.stdout = old_stdout
+                st.error(f"OCR 引擎初始化失败: {e}")
+                return
+
+            all_results = []
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            for i, uf in enumerate(uploaded_files):
+                status_text.text(f"正在处理 {uf.name}... ({i+1}/{len(uploaded_files)})")
+                progress_bar.progress(int((i / len(uploaded_files)) * 100))
+                img_path = os.path.join(input_dir, uf.name)
+                try:
+                    result = agent.process(img_path, output_dir)
+                    all_results.append((uf.name, result))
+                except Exception as e:
+                    print(f"[ERROR] 处理 {uf.name} 失败: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+            progress_bar.progress(100)
+            status_text.empty()
+            sys.stdout.flush()
+            sys.stdout = old_stdout
+
+            generated_files = []
+            for root, _, files in os.walk(output_dir):
+                for f in files:
+                    generated_files.append(os.path.join(root, f))
+
+            if not generated_files:
+                st.warning("未生成任何输出文件，请检查日志排查原因。")
+                return
+
+            st.success(f"✅ 处理完成！共生成 {len(generated_files)} 个文件")
+
+            for img_name, result in all_results:
+                base = os.path.splitext(img_name)[0]
+                related = [f for f in generated_files if os.path.basename(f).startswith(base)]
+                if not related:
+                    continue
+                with st.expander(f"📄 {img_name} — 置信度 {result.confidence:.0%}"):
+                    cols = st.columns([1, 1.5])
+                    with cols[0]:
+                        st.metric("提取曲线数", len([c for c in result.curves if c.is_valid]))
+                        st.metric("耗时", f"{result.processing_time:.1f}s")
+                        if result.warnings:
+                            st.caption(f"⚠️ {len(result.warnings)} 条警告")
+                    with cols[1]:
+                        for fpath in related:
+                            fname = os.path.basename(fpath)
+                            with open(fpath, "rb") as f:
+                                data = f.read()
+                            mime = "text/csv" if fname.endswith(".csv") else (
+                                "application/json" if fname.endswith(".json") else "image/png"
+                            )
+                            st.download_button(
+                                label=f"⬇️ {fname}",
+                                data=data,
+                                file_name=fname,
+                                mime=mime,
+                                key=f"{base}_{fname}",
+                                use_container_width=True,
+                            )
+
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                for fpath in generated_files:
+                    zf.write(fpath, os.path.basename(fpath))
+            zip_buffer.seek(0)
+            st.markdown("---")
+            st.download_button(
+                label="📦 打包下载全部结果 (.zip)",
+                data=zip_buffer.getvalue(),
+                file_name="chart_extraction_results.zip",
+                mime="application/zip",
+                use_container_width=True,
+            )
+
+        st.markdown('<div class="footer">云端离线计算，数据不上传至外部服务器</div>', unsafe_allow_html=True)
+
+
 if __name__ == "__main__":
-    main()
+    if STREAMLIT_AVAILABLE:
+        run_streamlit()
+    else:
+        main()
