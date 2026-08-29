@@ -1,0 +1,13 @@
+flask==3.0.3
+flask-cors==4.0.1
+Pillow==10.3.0
+numpy==1.26.4
+gunicorn==23.0.0
+
+# 轻量OCR引擎（内存占用~100MB，适配Render免费版512MB）
+rapidocr-onnxruntime==1.3.24
+
+# 图表提取核心依赖
+opencv-python==4.11.0.86
+pandas==2.2.3
+scipy==1.15.2
