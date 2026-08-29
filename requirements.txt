@@ -1,9 +1,0 @@
-streamlit
-opencv-python-headless
-rapidocr-onnxruntime
-pillow
-pandas
-openpyxl
-numpy
-scipy
-matplotlib
