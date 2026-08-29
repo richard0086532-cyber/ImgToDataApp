@@ -1,0 +1,12 @@
+flask==3.0.3
+flask-cors==4.0.1
+Pillow==10.3.0
+numpy==1.26.4
+gunicorn==23.0.0
+
+# 图表提取核心依赖
+paddlepaddle==3.0.0
+paddleocr==2.10.0
+opencv-python==4.11.0.86
+pandas==2.2.3
+scipy==1.15.2
